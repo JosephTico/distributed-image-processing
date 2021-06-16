@@ -4,6 +4,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 
 #define CLIENT_TYPE 3
 
@@ -76,6 +77,14 @@ void send_image(int socket)
 int main(int argc, char *argv[])
 {
 
+    if(argc >= 3){
+        int i;
+        for ( i = 0; i < argc; i++)
+        {
+            printf("arg %d:%s \n", i, argv[i]);
+        }
+    }
+
     int socket_desc;
     struct sockaddr_in server;
 
@@ -86,12 +95,12 @@ int main(int argc, char *argv[])
     {
         printf("Could not create socket");
     }
-
+    printf("P1\n");
     memset(&server, 0, sizeof(server));
     server.sin_addr.s_addr = inet_addr("127.0.0.1");
     server.sin_family = AF_INET;
     server.sin_port = htons(8889);
-
+    printf("P2\n");
     //Connect to remote server
     if (connect(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
     {
@@ -100,7 +109,7 @@ int main(int argc, char *argv[])
         puts("Connect Error");
         return 1;
     }
-
+    printf("P3\n");
     puts("Connected\n");
 
     send_image(socket_desc);

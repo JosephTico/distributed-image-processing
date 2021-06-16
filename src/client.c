@@ -6,15 +6,60 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include<time.h>
+
+#include <semaphore.h>
+
 
 #define CLIENT_TYPE 3
+#define MAX_SOCKETS 4
 
+sem_t sem;
+
+
+typedef struct
+{
+    const char *ip;
+    const char *filename;
+} request_data_s;
+
+int validate_params(const char *ip, const char *filename, const char *num);
+
+void sent_to_server_thread(void *request_data);
 
 int sent_to_server(const char *ip, const char *filename);
 void send_image(int socket, const char *filename);
 
+void sent_to_server_thread(void *request_data)
+{
+    request_data_s *data = (request_data_s *)request_data;
+    sem_wait(&sem);
+    sent_to_server(data->ip, data->filename);
+    sem_post(&sem);
+}
+
+int validate_params(const char *ip, const char *filename, const char *num)
+{
+
+    if (access(filename, F_OK) != 0)
+    {
+        printf("image file doesn't exist\n");
+        return 1;
+    }
+    if (atol(num) == 0)
+    {
+        printf("request number is zero or NaN\n");
+        return 1;
+    }
+    //validad direccion ip
+    return 0;
+}
+
 int sent_to_server(const char *ip, const char *filename)
 {
+    // printf("ip %s \n",  ip);
+    // printf("filename %s \n",  filename);
     int socket_desc;
     struct sockaddr_in server;
     //Create socket
@@ -35,8 +80,7 @@ int sent_to_server(const char *ip, const char *filename)
         puts("Connect Error");
         return 1;
     }
-    printf("P3\n");
-    puts("Connected\n");
+    // puts("Connected\n");
     send_image(socket_desc, filename);
     close(socket_desc);
     return 0;
@@ -62,28 +106,27 @@ void send_image(int socket, const char *filename)
     fseek(picture, 0, SEEK_END);
     size = ftell(picture);
     fseek(picture, 0, SEEK_SET);
-    printf("Total Picture size: %i\n", size);
+    // printf("Total Picture size: %i\n", size);
 
     //Send client type
-    printf("Sending Connection Identifier (3)\n");
+    // printf("Sending Connection Identifier (3)\n");
     write(socket, (void *)&connection_id, sizeof(int));
 
     //Send Picture Size
-    printf("Sending Picture Size\n");
+    // printf("Sending Picture Size\n");
     write(socket, (void *)&size, sizeof(int));
 
     //Send Picture as Byte Array
-    printf("Sending Picture as Byte Array\n");
+    // printf("Sending Picture as Byte Array\n");
 
     do
     { //Read while we get errors that are due to signals.
         stat = read(socket, &read_buffer, 255);
-        printf("Bytes read: %i\n", stat);
+        // printf("Bytes read: %i\n", stat);
     } while (stat < 0);
 
-    printf("Received data in socket\n");
-    printf("Socket data: %s\n", read_buffer);
-
+    // printf("Received data in socket\n");
+    // printf("Socket data: %s\n", read_buffer);
     while (!feof(picture))
     {
         //while(packet_index = 1){
@@ -96,30 +139,75 @@ void send_image(int socket, const char *filename)
             stat = write(socket, send_buffer, read_size);
         } while (stat < 0);
 
-        printf("Packet Number: %i\n", packet_index);
-        printf("Packet Size Sent: %i\n", read_size);
-        printf(" \n");
-        printf(" \n");
+        // printf("Packet Number: %i\n", packet_index);
+        // printf("Packet Size Sent: %i\n", read_size);
+        // printf(" \n");
+        // printf(" \n");
 
         packet_index++;
 
         //Zero out our send buffer
         bzero(send_buffer, sizeof(send_buffer));
     }
+    printf("ok \n");
 }
 
 int main(int argc, char *argv[])
 {
+    sem_init(&sem, 0, MAX_SOCKETS);
 
     if (argc >= 3)
     {
         int i;
         for (i = 0; i < argc; i++)
         {
-            printf("arg %d:%s \n", i, argv[i]);
+            printf("arg %d :%s \n", i, argv[i]);
         }
     }
-    sent_to_server(argv[1], argv[2]);
+    else
+    {
+        printf("not enough arguments");
+        return 1;
+    }
+    const char *ip = argv[1];
+    const char *filename = argv[2];
+    const char *num = argv[3];
+
+    if (validate_params(ip, filename, num))
+    {
+        return 1;
+    }
+    else
+    {
+        int i;
+        request_data_s data;
+        data.filename = filename;
+        data.ip = ip;
+        int num_int = atol(num);
+        pthread_t th_ids[num_int];
+        int rc;
+        for (i = 0; i < num_int; i++)
+        {
+            // sleep(1);
+            rc = pthread_create(&th_ids[i], NULL, sent_to_server_thread, (void *)&data);
+            if (rc)
+            {
+                printf("Error:unable to create thread, %d\n", rc);
+                exit(-1);
+            }
+            printf("thread create %d \n", i);
+            // sent_to_server(ip, filename);
+        }
+        void *ret;
+        int j;
+        for (j = 0; j< num_int; j++)
+        {
+            printf("num_int %d of %d\n",j+1,num_int);
+            pthread_join(th_ids[j], &ret);
+            printf("thread join %d \n", j);
+        }
+    }
+
     // atol(argv[3]);
 
     return 0;

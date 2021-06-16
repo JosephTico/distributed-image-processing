@@ -7,8 +7,8 @@ HEADER	= stb_image.h stb_image_write.h
 # Compilation flags
 CC := gcc
 LD := gcc
-CFLAGS := -Wall
-LFLAGS	 = -lm -ltiff -ljpeg -lpng -pthread
+CFLAGS := -Wall 
+LFLAGS	 = -lm -ltiff -ljpeg -lpng -pthread 
 
 # Files to be compiled
 SRCS := $(wildcard $(SRC_DIR)/*.c)

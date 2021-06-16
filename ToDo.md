@@ -8,6 +8,7 @@
 * guardar timestamp imagenes
 * asignar carga de trabajo
 * parametros ip nodos
+* ???todas se estan guardando como png
 
 ## Cliente
 
@@ -15,6 +16,7 @@
 * implementar threads
 * join threads
 * imprimir imagenes inviadas
+* png o jpg
 
 ## Nodo
 

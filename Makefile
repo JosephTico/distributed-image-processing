@@ -5,8 +5,8 @@ OBJ_DIR := $(BUILD_DIR)/obj
 HEADER	= stb_image.h stb_image_write.h 
 
 # Compilation flags
-CC := gcc
-LD := gcc
+CC := mpicc
+LD := mpicc
 CFLAGS := -Wall
 LFLAGS	 = -lm -ltiff -ljpeg -lpng -pthread
 

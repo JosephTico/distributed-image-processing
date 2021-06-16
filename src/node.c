@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <errno.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -7,6 +11,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#define NODE_CONNECTION_TYPE 4
 struct image_threads_arguments
 {
   char *filename;
@@ -63,6 +68,49 @@ int main()
   // printf() displays the string inside quotation
   printf("Hello, World!\n");
 
+  int socket_desc;
+  int connection_id = NODE_CONNECTION_TYPE;
+  struct sockaddr_in server;
+
+  //Create socket
+  socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+
+  if (socket_desc == -1)
+  {
+    printf("Could not create socket");
+  }
+
+  memset(&server, 0, sizeof(server));
+  server.sin_addr.s_addr = inet_addr("127.0.0.1");
+  server.sin_family = AF_INET;
+  server.sin_port = htons(8889);
+
+  //Connect to remote server
+  if (connect(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
+  {
+    printf("Error: %s\n", strerror(errno));
+    close(socket_desc);
+    puts("Connect Error");
+    return 1;
+  }
+
+  puts("Connected\n");
+
+  //Send client type
+  printf("Sending Connection Identifier (4)\n");
+  write(socket, (void *)&connection_id, sizeof(int));
+
+  int size, stat;
+  char read_buffer[256];
+
+  do
+  { //Read while we get errors that are due to signals.
+    puts("EJECUTANDO CONDICIONAL");
+    puts("INICIANDO ESPERA");
+    stat = read(socket, &read_buffer, sizeof(int));
+    printf("Bytes read: %i\n", stat);
+  } while (stat < 0);
+
   struct image_threads_arguments *arguments = (struct image_threads_arguments *)malloc(sizeof(struct image_threads_arguments));
   arguments->filename = "received_image.png";
   arguments->key = 2145;
@@ -73,6 +121,8 @@ int main()
   pthread_create(&thread_id, NULL, process_image, (void *)arguments);
   pthread_join(thread_id, NULL);
   printf("After Thread\n");
+
+  close(socket_desc);
 
   return 0;
 }

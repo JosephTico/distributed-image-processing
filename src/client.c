@@ -1,13 +1,11 @@
 #include <stdio.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <errno.h>
 
-//This function is to be used once we have confirmed that an image is to be sent
-//It should read and output an image file
+#define CLIENT_TYPE 3
 
 void send_image(int socket)
 {
@@ -16,6 +14,7 @@ void send_image(int socket)
     int size, read_size, stat, packet_index;
     char send_buffer[10240], read_buffer[256];
     packet_index = 1;
+    int connection_id = CLIENT_TYPE;
 
     picture = fopen("lenna.png", "rb");
     printf("Getting Picture Size\n");
@@ -29,6 +28,10 @@ void send_image(int socket)
     size = ftell(picture);
     fseek(picture, 0, SEEK_SET);
     printf("Total Picture size: %i\n", size);
+
+    //Send client type
+    printf("Sending Connection Identifier (3)\n");
+    write(socket, (void *)&connection_id, sizeof(int));
 
     //Send Picture Size
     printf("Sending Picture Size\n");

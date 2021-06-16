@@ -1,9 +1,38 @@
 #include <stdio.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+
+#define CLIENT 3
+#define NODE 4
+
+void *connection_handler(void *socket_desc)
+{
+  int socket = *(int *)socket_desc;
+  int connection_type = 0, size_received;
+
+  do
+  {
+    size_received = read(socket, &connection_type, sizeof(int));
+  } while (size_received < 0);
+
+  if (connection_type == CLIENT)
+  {
+    puts("Received connection from CLIENT");
+    receive_image(socket);
+  }
+  else if (connection_type == NODE)
+  {
+    puts("Received connection from NODE");
+  } 
+  else 
+  {
+    printf("Received unhandled connection type: %i\n", connection_type);
+  }
+
+  return 0;
+}
 
 int receive_image(int socket)
 { // Start function
@@ -131,22 +160,31 @@ int main(int argc, char *argv[])
   puts("Waiting for incoming connections...");
   c = sizeof(struct sockaddr_in);
 
-  if ((new_socket = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
+  pthread_t thread_id;
+
+  while ((new_socket = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
   {
     puts("Connection accepted");
+  
+
+    fflush(stdout);
+
+    if (new_socket < 0)
+    {
+      perror("Accept Failed");
+      return 1;
+    }
+
+    if (pthread_create(&thread_id, NULL, connection_handler, (void *)&new_socket) < 0)
+    {
+      perror("could not create thread");
+      return 1;
+    }
+
+
   }
 
-  fflush(stdout);
-
-  if (new_socket < 0)
-  {
-    perror("Accept Failed");
-    return 1;
-  }
-
-  receive_image(new_socket);
-
-  close(socket_desc);
+  // close(socket_desc);
   fflush(stdout);
   return 0;
 }

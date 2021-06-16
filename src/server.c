@@ -8,9 +8,9 @@
 int receive_image(int socket)
 { // Start function
 
-  int buffersize = 0, recv_size = 0, size = 0, read_size, write_size, packet_index = 1, stat;
+  int recv_size = 0, size = 0, read_size, write_size, packet_index = 1, stat;
 
-  char imagearray[10241], verify = '1';
+  char imagearray[10241];
   FILE *image;
 
   //Find the size of the image
@@ -35,7 +35,7 @@ int receive_image(int socket)
   printf("Reply sent\n");
   printf(" \n");
 
-  image = fopen("capture2.jpeg", "w");
+  image = fopen("received_image.png", "w");
 
   if (image == NULL)
   {
@@ -45,11 +45,10 @@ int receive_image(int socket)
 
   //Loop while we have not received the entire file yet
 
-  int need_exit = 0;
   struct timeval timeout = {10, 0};
 
   fd_set fds;
-  int buffer_fd, buffer_out;
+  int buffer_fd;
 
   while (recv_size < size)
   {
@@ -101,9 +100,8 @@ int receive_image(int socket)
 
 int main(int argc, char *argv[])
 {
-  int socket_desc, new_socket, c, read_size, buffer = 0;
+  int socket_desc, new_socket, c;
   struct sockaddr_in server, client;
-  char *readin;
 
   //Create socket
   socket_desc = socket(AF_INET, SOCK_STREAM, 0);

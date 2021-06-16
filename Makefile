@@ -2,11 +2,13 @@
 SRC_DIR := ./src
 BUILD_DIR := ./build
 OBJ_DIR := $(BUILD_DIR)/obj
+HEADER	= stb_image.h stb_image_write.h 
 
 # Compilation flags
 CC := gcc
 LD := gcc
 CFLAGS := -Wall
+LFLAGS	 = -lm -ltiff -ljpeg -lpng -pthread
 
 # Files to be compiled
 SRCS := $(wildcard $(SRC_DIR)/*.c)
@@ -22,13 +24,13 @@ all: $(BUILD)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c 
 	@echo + CC $<
 	@mkdir -p $(OBJ_DIR)
-	@$(CC) $(CFLAGS) -c -o $@ $<
+	@$(CC) $(CFLAGS) -c -o $@ $< $(LFLAGS)
 	
 # Link each *.o file as executable files
 $(BUILD_DIR)/%: $(OBJ_DIR)/%.o
 	@echo + LD $@
 	@mkdir -p $(BUILD_DIR)
-	@$(LD) $(CFLAGS) -o $@ $<
+	@$(LD) $(CFLAGS) -o $@ $< $(LFLAGS)
 	
 .PHONY: all clean
 

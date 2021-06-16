@@ -9,7 +9,7 @@
 //This function is to be used once we have confirmed that an image is to be sent
 //It should read and output an image file
 
-int send_image(int socket)
+void send_image(int socket)
 {
 
     FILE *picture;
@@ -44,7 +44,7 @@ int send_image(int socket)
     } while (stat < 0);
 
     printf("Received data in socket\n");
-    printf("Socket data: %c\n", read_buffer);
+    printf("Socket data: %s\n", read_buffer);
 
     while (!feof(picture))
     {
@@ -75,7 +75,6 @@ int main(int argc, char *argv[])
 
     int socket_desc;
     struct sockaddr_in server;
-    char *parray;
 
     //Create socket
     socket_desc = socket(AF_INET, SOCK_STREAM, 0);

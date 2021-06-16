@@ -5,10 +5,44 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define CLIENT_TYPE 3
 
-void send_image(int socket)
+
+int sent_to_server(const char *ip, const char *filename);
+void send_image(int socket, const char *filename);
+
+int sent_to_server(const char *ip, const char *filename)
+{
+    int socket_desc;
+    struct sockaddr_in server;
+    //Create socket
+    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_desc == -1)
+    {
+        printf("Could not create socket");
+    }
+    memset(&server, 0, sizeof(server));
+    server.sin_addr.s_addr = inet_addr(ip);
+    server.sin_family = AF_INET;
+    server.sin_port = htons(8889);
+    //Connect to remote server
+    if (connect(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
+    {
+        printf("Error: %s\n", strerror(errno));
+        close(socket_desc);
+        puts("Connect Error");
+        return 1;
+    }
+    printf("P3\n");
+    puts("Connected\n");
+    send_image(socket_desc, filename);
+    close(socket_desc);
+    return 0;
+}
+
+void send_image(int socket, const char *filename)
 {
 
     FILE *picture;
@@ -17,7 +51,7 @@ void send_image(int socket)
     packet_index = 1;
     int connection_id = CLIENT_TYPE;
 
-    picture = fopen("lenna.png", "rb");
+    picture = fopen(filename, "rb");
     printf("Getting Picture Size\n");
 
     if (picture == NULL)
@@ -77,44 +111,16 @@ void send_image(int socket)
 int main(int argc, char *argv[])
 {
 
-    if(argc >= 3){
+    if (argc >= 3)
+    {
         int i;
-        for ( i = 0; i < argc; i++)
+        for (i = 0; i < argc; i++)
         {
             printf("arg %d:%s \n", i, argv[i]);
         }
     }
-
-    int socket_desc;
-    struct sockaddr_in server;
-
-    //Create socket
-    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-
-    if (socket_desc == -1)
-    {
-        printf("Could not create socket");
-    }
-    printf("P1\n");
-    memset(&server, 0, sizeof(server));
-    server.sin_addr.s_addr = inet_addr("127.0.0.1");
-    server.sin_family = AF_INET;
-    server.sin_port = htons(8889);
-    printf("P2\n");
-    //Connect to remote server
-    if (connect(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
-    {
-        printf("Error: %s\n", strerror(errno));
-        close(socket_desc);
-        puts("Connect Error");
-        return 1;
-    }
-    printf("P3\n");
-    puts("Connected\n");
-
-    send_image(socket_desc);
-
-    close(socket_desc);
+    sent_to_server(argv[1], argv[2]);
+    // atol(argv[3]);
 
     return 0;
 }

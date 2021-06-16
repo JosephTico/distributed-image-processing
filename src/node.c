@@ -98,7 +98,7 @@ int main()
 
   //Send client type
   printf("Sending Connection Identifier (4)\n");
-  write(socket, (void *)&connection_id, sizeof(int));
+  write(socket_desc, (void *)&connection_id, sizeof(int));
 
   int size, stat;
   char read_buffer[256];
@@ -107,7 +107,7 @@ int main()
   { //Read while we get errors that are due to signals.
     puts("EJECUTANDO CONDICIONAL");
     puts("INICIANDO ESPERA");
-    stat = read(socket, &read_buffer, sizeof(int));
+    stat = read(socket_desc, &read_buffer, sizeof(int), MSG_WAITALL);
     printf("Bytes read: %i\n", stat);
   } while (stat < 0);
 

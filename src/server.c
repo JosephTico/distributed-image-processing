@@ -62,13 +62,15 @@ void *connection_handler(void *socket_desc_void)
   return 0;
 }
 
+// Runs in loop to parse new received commands
 void parse_node_command(int socket, ConnectionContainer *connection_container)
 {
   char current_command;
   int size_received;
 
-  puts("WAITING FOR COMMAND");
+  printf("[Node #%i] WAITING FOR COMMAND", connection_container->position);
 
+  // Check if disconnected
   size_received = read(socket, &current_command, sizeof(char), MSG_WAITALL);
   if (size_received <= 0)
   {
@@ -78,14 +80,13 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
     return;
   }
 
-  printf("COMMAND RECEIVED: %c\n", current_command);
+  printf("[Node #%i] COMMAND RECEIVED: %c\n", connection_container->position, current_command);
 
   // Receiving CURRENT NODE LOAD
   if (current_command == 'B')
   {
     int current_load;
     read(socket, &current_load, sizeof(int), MSG_WAITALL);
-    printf("RECEIVED B, LOAD OF %i from NODE\n", current_load);
   }
 
   parse_node_command(socket, connection_container);
@@ -114,10 +115,10 @@ void setup_node(int socket)
   new_conn.position = ++current_connection_count;
   main_container[current_connection_count] = new_conn;
 
+  // Send initial signal
   char buffer = 'A';
   int stat;
 
-  //Send our verification signal
   do
   {
     stat = write(socket, (void *)&buffer, sizeof(char));
@@ -127,7 +128,7 @@ void setup_node(int socket)
 }
 
 int receive_image(int socket)
-{ // Start function
+{
 
   int recv_size = 0, size = 0, read_size, write_size, packet_index = 1, stat;
 
@@ -221,9 +222,8 @@ int receive_image(int socket)
       // printf(" \n");
       // printf(" \n");
     }
-    
   }
-  printf("image %d done\n",fcounter);
+  printf("image %d done\n", fcounter);
   fclose(image);
   // printf("Image successfully Received!\n");
   return 1;
@@ -288,7 +288,7 @@ int main(int argc, char *argv[])
     int *new_socket_ptr;
     new_socket_ptr = (int *)malloc(sizeof(int));
     *new_socket_ptr = new_socket;
-    printf("newsocket %d\n",new_socket);
+    printf("newsocket %d\n", new_socket);
     printf("newsocket_ptr %d\n", new_socket_ptr);
 
     int thread_create_result;
@@ -296,7 +296,7 @@ int main(int argc, char *argv[])
     thread_create_result = pthread_create(&thread_id, NULL, connection_handler, (void *)new_socket_ptr);
     sem_post(&sem);
 
-    if ( thread_create_result < 0)
+    if (thread_create_result < 0)
     {
       free(new_socket_ptr);
       perror("could not create thread");

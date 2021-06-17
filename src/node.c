@@ -63,6 +63,50 @@ void *process_image(void *arguments_input)
   return NULL;
 }
 
+int send_message(int socket, void *buffer, size_t size)
+{
+  int stat;
+
+  do
+  {
+    stat = write(socket, &buffer, size);
+  } while (stat < 0);
+
+  return stat;
+}
+
+void parse_command(int socket, int current_image_count)
+{
+  char current_command = 'Z';
+  int stat;
+  puts("WAITING FOR COMMAND");
+  stat = read(socket, &current_command, sizeof(char), MSG_WAITALL);
+  if (stat <= 0)
+  {
+    printf("Disconnected");
+    close(socket);
+    return;
+  }
+  printf("COMMAND RECEIVED: %c\n", current_command);
+
+  puts("PArsing command");
+  if (current_command == 'A')
+  {
+    puts("Received A command, sending current image count\n");
+    printf("Image count: %i\n", current_image_count);
+    send_message(socket, 'B', sizeof(char));
+    puts("SEG1");
+    send_message(socket, current_image_count, sizeof(int));
+    puts("SEG2");
+  }
+  else
+  {
+    puts("Received invalid command");
+  }
+
+  parse_command(socket, current_image_count);
+}
+
 int main()
 {
   // printf() displays the string inside quotation
@@ -101,14 +145,14 @@ int main()
   write(socket_desc, (void *)&connection_id, sizeof(int));
 
   int size, stat;
-  char read_buffer[256];
+
+  int current_image_count = 92;
 
   do
   { //Read while we get errors that are due to signals.
     puts("EJECUTANDO CONDICIONAL");
     puts("INICIANDO ESPERA");
-    stat = read(socket_desc, &read_buffer, sizeof(int), MSG_WAITALL);
-    printf("Bytes read: %i\n", stat);
+    parse_command(socket_desc, current_image_count);
   } while (stat < 0);
 
   struct image_threads_arguments *arguments = (struct image_threads_arguments *)malloc(sizeof(struct image_threads_arguments));

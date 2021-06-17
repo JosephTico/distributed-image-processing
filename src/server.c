@@ -1,36 +1,49 @@
 #include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
-
+#include <sys/ioctl.h>
+#include <stdbool.h>
 #define MAX_SOCKETS 4
-
 
 #define CLIENT 3
 #define NODE 4
+
+// Struct for nodes
+typedef struct
+{
+  int socket;
+  pthread_mutex_t *lock;
+  int current_jobs;
+  int position;
+  bool dead;
+} ConnectionContainer;
+
+// Global variables
+int current_connection_count = 0;
+ConnectionContainer main_container[256];
 sem_t sem;
 pthread_mutex_t lock;
 int filecounter;
 
-
-int receive_image(int socket);
-
-
-void *connection_handler(void *socket_desc)
+// Main function to handle new connections
+void *connection_handler(void *socket_desc_void)
 {
-  int socket = *(int *)socket_desc;
+  int socket = *(int *)socket_desc_void;
+  // Initialize variables
   int connection_type = 0, size_received;
-    printf("newsocket_handler %d\n",socket);
 
-  
-  do
+  // Get received message (connection ID)
+  size_received = read(socket, &connection_type, sizeof(int), MSG_WAITALL);
+  if (size_received <= 0)
   {
-    size_received = read(socket, &connection_type, sizeof(int));
-  } while (size_received < 0);
+    puts("DISCONNECTED");
+    close(socket);
+    return;
+  }
 
   if (connection_type == CLIENT)
   {
@@ -40,13 +53,77 @@ void *connection_handler(void *socket_desc)
   else if (connection_type == NODE)
   {
     puts("Received connection from NODE");
+    setup_node(socket);
   }
   else
   {
     printf("Received unhandled connection type: %i\n", connection_type);
   }
-  free((int *)socket_desc);
   return 0;
+}
+
+void parse_node_command(int socket, ConnectionContainer *connection_container)
+{
+  char current_command;
+  int size_received;
+
+  puts("WAITING FOR COMMAND");
+
+  size_received = read(socket, &current_command, sizeof(char), MSG_WAITALL);
+  if (size_received <= 0)
+  {
+    printf("Socket #%i, on slot #%i, Disconnected\n", socket, connection_container->position);
+    connection_container->dead = true;
+    close(socket);
+    return;
+  }
+
+  printf("COMMAND RECEIVED: %c\n", current_command);
+
+  // Receiving CURRENT NODE LOAD
+  if (current_command == 'B')
+  {
+    int current_load;
+    read(socket, &current_load, sizeof(int), MSG_WAITALL);
+    printf("RECEIVED B, LOAD OF %i from NODE\n", current_load);
+  }
+
+  parse_node_command(socket, connection_container);
+}
+
+void setup_node(int socket)
+{
+  // Creates a new container and a pointer to it
+  ConnectionContainer new_conn;
+  ConnectionContainer *new_conn_ptr = &new_conn;
+  // Set socket
+  new_conn.socket = socket;
+  // Create, set and init mutex lock
+  new_conn.lock = pthread_mutex_lock;
+  pthread_mutex_t *plock;
+  plock = malloc(sizeof(pthread_mutex_t));
+  new_conn_ptr->lock = plock;
+  if (pthread_mutex_init(new_conn.lock, NULL) != 0)
+  {
+    printf("\n mutex init failed\n");
+    return 1;
+  }
+  // Rest of container init
+  new_conn.current_jobs = 0;
+  new_conn.dead = false;
+  new_conn.position = ++current_connection_count;
+  main_container[current_connection_count] = new_conn;
+
+  char buffer = 'A';
+  int stat;
+
+  //Send our verification signal
+  do
+  {
+    stat = write(socket, (void *)&buffer, sizeof(char));
+  } while (stat < 0);
+
+  parse_node_command(socket, new_conn_ptr);
 }
 
 int receive_image(int socket)
@@ -212,11 +289,11 @@ int main(int argc, char *argv[])
     new_socket_ptr = (int *)malloc(sizeof(int));
     *new_socket_ptr = new_socket;
     printf("newsocket %d\n",new_socket);
-    printf("newsocket_ptr %d\n",*new_socket_ptr);
+    printf("newsocket_ptr %d\n", new_socket_ptr);
 
     int thread_create_result;
     sem_wait(&sem);
-    thread_create_result= pthread_create(&thread_id, NULL, connection_handler, (void *)new_socket_ptr);
+    thread_create_result = pthread_create(&thread_id, NULL, connection_handler, (void *)new_socket_ptr);
     sem_post(&sem);
 
     if ( thread_create_result < 0)

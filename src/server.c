@@ -7,8 +7,11 @@
 #include <semaphore.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
-#define MAX_SOCKETS 4
+#include <signal.h>
+#include <string.h>
+#include <stdint.h>
 
+#define MAX_SOCKETS 4
 #define CLIENT 3
 #define NODE 4
 
@@ -24,15 +27,42 @@ typedef struct
 
 // Global variables
 int current_connection_count = 0;
-ConnectionContainer main_container[256];
+ConnectionContainer *main_container[256];
 sem_t sem;
 pthread_mutex_t lock;
 int filecounter;
+int socket_desc;
+
+int intHandler(int dummy)
+{
+  send_kill_signals();
+  close(socket_desc);
+  exit(0);
+}
+
+void send_kill_signals()
+{
+  printf("Sending kill signals to connected nodes...\n");
+  for (size_t i = 0; i < current_connection_count; i++)
+  {
+    if (main_container[i]->dead)
+      continue;
+    send_kill_signal(main_container[i]->socket, i);
+  }
+}
+
+void send_kill_signal(int socket, int i)
+{
+  printf("Killing node #%i...\n", i);
+  printf("KILLING SOCKET %i\n", socket);
+  shutdown(socket, SHUT_WR);
+  close(socket);
+}
 
 // Main function to handle new connections
 void *connection_handler(void *socket_desc_void)
 {
-  int socket = *(int *)socket_desc_void;
+  int socket = (uintptr_t)socket_desc_void;
   // Initialize variables
   int connection_type = 0, size_received;
 
@@ -68,25 +98,32 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
   char current_command;
   int size_received;
 
-  printf("[Node #%i] WAITING FOR COMMAND", connection_container->position);
+  printf("[Node #%i] Jobs No: %i\n", connection_container->position, connection_container->current_jobs);
+
+  printf("[Node #%i] Waiting for command...\n", connection_container->position);
 
   // Check if disconnected
   size_received = read(socket, &current_command, sizeof(char), MSG_WAITALL);
   if (size_received <= 0)
   {
-    printf("Socket #%i, on slot #%i, Disconnected\n", socket, connection_container->position);
+    printf("[Node #%i]  Disconnected\n", connection_container->position);
     connection_container->dead = true;
     close(socket);
     return;
   }
 
-  printf("[Node #%i] COMMAND RECEIVED: %c\n", connection_container->position, current_command);
+  printf("[Node #%i] Command received: %c\n", connection_container->position, current_command);
 
   // Receiving CURRENT NODE LOAD
   if (current_command == 'B')
   {
     int current_load;
     read(socket, &current_load, sizeof(int), MSG_WAITALL);
+    connection_container->current_jobs = current_load;
+  }
+  else
+  {
+    printf("[Node #%i] Unhandled command received.\n", connection_container->position);
   }
 
   parse_node_command(socket, connection_container);
@@ -98,7 +135,7 @@ void setup_node(int socket)
   ConnectionContainer new_conn;
   ConnectionContainer *new_conn_ptr = &new_conn;
   // Set socket
-  new_conn.socket = socket;
+  new_conn.socket = (uintptr_t)socket;
   // Create, set and init mutex lock
   new_conn.lock = pthread_mutex_lock;
   pthread_mutex_t *plock;
@@ -112,8 +149,8 @@ void setup_node(int socket)
   // Rest of container init
   new_conn.current_jobs = 0;
   new_conn.dead = false;
-  new_conn.position = ++current_connection_count;
-  main_container[current_connection_count] = new_conn;
+  new_conn.position = current_connection_count;
+  main_container[current_connection_count++] = new_conn_ptr;
 
   // Send initial signal
   char buffer = 'A';
@@ -231,6 +268,7 @@ int receive_image(int socket)
 
 int main(int argc, char *argv[])
 {
+  signal(SIGINT, intHandler);
   sem_init(&sem, 0, MAX_SOCKETS);
 
   filecounter = 0;
@@ -240,7 +278,7 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  int socket_desc, new_socket, c;
+  int new_socket, c;
   struct sockaddr_in server, client;
 
   //Create socket
@@ -293,7 +331,7 @@ int main(int argc, char *argv[])
 
     int thread_create_result;
     sem_wait(&sem);
-    thread_create_result = pthread_create(&thread_id, NULL, connection_handler, (void *)new_socket_ptr);
+    thread_create_result = pthread_create(&thread_id, NULL, connection_handler, (void *)(uintptr_t)new_socket);
     sem_post(&sem);
 
     if (thread_create_result < 0)
@@ -306,5 +344,7 @@ int main(int argc, char *argv[])
 
   // close(socket_desc);
   fflush(stdout);
+  close(socket_desc);
+
   return 0;
 }

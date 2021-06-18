@@ -83,7 +83,7 @@ void parse_command(int socket, int current_image_count)
   stat = read(socket, &current_command, sizeof(char), MSG_WAITALL);
   if (stat <= 0)
   {
-    printf("Disconnected");
+    printf("Disconnected from server.\n");
     close(socket);
     return;
   }

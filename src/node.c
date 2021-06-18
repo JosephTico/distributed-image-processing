@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <string.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -67,10 +69,12 @@ int send_message(int socket, void *buffer, size_t size)
 {
   int stat;
 
-  do
+  stat = write(socket, &buffer, size);
+
+  if (stat < 0)
   {
-    stat = write(socket, &buffer, size);
-  } while (stat < 0);
+    printf("Error sending message: %s\n", strerror(errno));
+  }
 
   return stat;
 }
@@ -80,7 +84,7 @@ void parse_command(int socket, int current_image_count)
   char current_command = 'Z';
   int stat;
   puts("WAITING FOR COMMAND");
-  stat = read(socket, &current_command, sizeof(char), MSG_WAITALL);
+  stat = recv(socket, &current_command, sizeof(char), MSG_WAITALL);
   if (stat <= 0)
   {
     printf("Disconnected from server.\n");
@@ -94,10 +98,18 @@ void parse_command(int socket, int current_image_count)
   {
     puts("Received A command, sending current image count\n");
     printf("Image count: %i\n", current_image_count);
-    send_message(socket, 'B', sizeof(char));
+    send_message(socket, (void *)'B', sizeof(char));
     puts("SEG1");
     send_message(socket, current_image_count, sizeof(int));
     puts("SEG2");
+  }
+  else if (current_command == 'I')
+  {
+    puts("Received a new image");
+    current_image_count++;
+    sleep(5);
+    send_message(socket, (void *)'D', sizeof(char));
+    current_image_count--;
   }
   else
   {
@@ -144,16 +156,9 @@ int main()
   printf("Sending Connection Identifier (4)\n");
   write(socket_desc, (void *)&connection_id, sizeof(int));
 
-  int size, stat;
+  int current_image_count = 0;
 
-  int current_image_count = 92;
-
-  do
-  { //Read while we get errors that are due to signals.
-    puts("EJECUTANDO CONDICIONAL");
-    puts("INICIANDO ESPERA");
-    parse_command(socket_desc, current_image_count);
-  } while (stat < 0);
+  parse_command(socket_desc, current_image_count);
 
   struct image_threads_arguments *arguments = (struct image_threads_arguments *)malloc(sizeof(struct image_threads_arguments));
   arguments->filename = "received_image.png";

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -10,6 +11,7 @@
 #include <signal.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #define MAX_SOCKETS 4
 #define CLIENT 3
@@ -33,7 +35,21 @@ pthread_mutex_t lock;
 int filecounter;
 int socket_desc;
 
-int intHandler(int dummy)
+// Headers
+void intHandler(int dummy);
+void send_kill_signals();
+void send_kill_signal(int socket, int i);
+void *connection_handler(void *socket_desc_void);
+void parse_node_command(int socket, ConnectionContainer *connection_container);
+void setup_node(int socket);
+int receive_image(int socket);
+int get_available_node();
+void send_image_to_distributed_nodes(char *filename);
+void send_message_to_node(int node, void *buffer, size_t size);
+void send_image_to_node(int node, char *filename);
+
+// Handle SIGINT
+void intHandler(int dummy)
 {
   send_kill_signals();
   close(socket_desc);
@@ -67,12 +83,12 @@ void *connection_handler(void *socket_desc_void)
   int connection_type = 0, size_received;
 
   // Get received message (connection ID)
-  size_received = read(socket, &connection_type, sizeof(int), MSG_WAITALL);
+  size_received = recv(socket, &connection_type, sizeof(int), MSG_WAITALL);
   if (size_received <= 0)
   {
-    puts("DISCONNECTED");
+    puts("Disconnected");
     close(socket);
-    return;
+    return NULL;
   }
 
   if (connection_type == CLIENT)
@@ -103,10 +119,10 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
   printf("[Node #%i] Waiting for command...\n", connection_container->position);
 
   // Check if disconnected
-  size_received = read(socket, &current_command, sizeof(char), MSG_WAITALL);
+  size_received = recv(socket, &current_command, sizeof(char), MSG_WAITALL);
   if (size_received <= 0)
   {
-    printf("[Node #%i]  Disconnected\n", connection_container->position);
+    printf("[Node #%i] Disconnected\n", connection_container->position);
     connection_container->dead = true;
     close(socket);
     return;
@@ -118,8 +134,16 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
   if (current_command == 'B')
   {
     int current_load;
-    read(socket, &current_load, sizeof(int), MSG_WAITALL);
+    recv(socket, &current_load, sizeof(int), MSG_WAITALL);
     connection_container->current_jobs = current_load;
+  }
+  // Completed image
+  else if (current_command == 'D')
+  {
+    printf("[Node #%i]  Finished an image\n", connection_container->position);
+    pthread_mutex_lock(connection_container->lock);
+    connection_container->current_jobs--;
+    pthread_mutex_unlock(connection_container->lock);
   }
   else
   {
@@ -132,34 +156,27 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
 void setup_node(int socket)
 {
   // Creates a new container and a pointer to it
-  ConnectionContainer new_conn;
-  ConnectionContainer *new_conn_ptr = &new_conn;
+  ConnectionContainer *new_conn_ptr = malloc(sizeof(ConnectionContainer));
   // Set socket
-  new_conn.socket = (uintptr_t)socket;
+  new_conn_ptr->socket = (uintptr_t)socket;
   // Create, set and init mutex lock
-  new_conn.lock = pthread_mutex_lock;
   pthread_mutex_t *plock;
   plock = malloc(sizeof(pthread_mutex_t));
   new_conn_ptr->lock = plock;
-  if (pthread_mutex_init(new_conn.lock, NULL) != 0)
+  if (pthread_mutex_init(new_conn_ptr->lock, NULL) != 0)
   {
     printf("\n mutex init failed\n");
-    return 1;
+    return;
   }
   // Rest of container init
-  new_conn.current_jobs = 0;
-  new_conn.dead = false;
-  new_conn.position = current_connection_count;
+  new_conn_ptr->current_jobs = 0;
+  new_conn_ptr->dead = false;
+  new_conn_ptr->position = current_connection_count;
   main_container[current_connection_count++] = new_conn_ptr;
 
   // Send initial signal
   char buffer = 'A';
-  int stat;
-
-  do
-  {
-    stat = write(socket, (void *)&buffer, sizeof(char));
-  } while (stat < 0);
+  write(socket, (void *)&buffer, sizeof(char));
 
   parse_node_command(socket, new_conn_ptr);
 }
@@ -261,9 +278,60 @@ int receive_image(int socket)
     }
   }
   printf("image %d done\n", fcounter);
+  send_image_to_distributed_nodes(file_name_string);
   fclose(image);
   // printf("Image successfully Received!\n");
   return 1;
+}
+
+int get_available_node()
+{
+  for (size_t i = 0; i < current_connection_count; i++)
+  {
+    printf("I: %li, Dead: %i, jobs: %i\n", i, main_container[i]->dead, main_container[i]->current_jobs);
+
+    if (!main_container[i]->dead && main_container[i]->current_jobs < 3)
+      return i;
+  }
+  return -1;
+}
+
+void send_image_to_distributed_nodes(char *filename)
+{
+  int node = get_available_node();
+
+  if (node < 0)
+  {
+    printf("NO HAY CAMPO :(\n");
+  }
+  else
+  {
+    send_image_to_node(node, filename);
+  }
+}
+
+void send_message_to_node(int node, void *buffer, size_t size)
+{
+  pthread_mutex_lock(main_container[node]->lock);
+  int stat;
+  stat = write(main_container[node]->socket, &buffer, size);
+  if (stat < 0)
+  {
+    printf("[Node #%i] Error sending message: %s\n", node, strerror(errno));
+  }
+  pthread_mutex_unlock(main_container[node]->lock);
+}
+
+void send_image_to_node(int node, char *filename)
+{
+  printf("Sending new image to Node #%i\n", node);
+
+  send_message_to_node(node, (void *)'I', sizeof(char));
+
+  puts("Image sent\n");
+  pthread_mutex_lock(main_container[node]->lock);
+  main_container[node]->current_jobs++;
+  pthread_mutex_unlock(main_container[node]->lock);
 }
 
 int main(int argc, char *argv[])
@@ -326,8 +394,6 @@ int main(int argc, char *argv[])
     int *new_socket_ptr;
     new_socket_ptr = (int *)malloc(sizeof(int));
     *new_socket_ptr = new_socket;
-    printf("newsocket %d\n", new_socket);
-    printf("newsocket_ptr %d\n", new_socket_ptr);
 
     int thread_create_result;
     sem_wait(&sem);

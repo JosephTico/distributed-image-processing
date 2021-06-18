@@ -7,7 +7,7 @@ HEADER	= stb_image.h stb_image_write.h
 # Compilation flags
 CC := gcc
 LD := gcc
-CFLAGS := -Wall 
+CFLAGS := -Wall -std=c11
 LFLAGS	 = -lm -ltiff -ljpeg -lpng -pthread 
 
 # Files to be compiled

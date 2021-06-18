@@ -70,7 +70,7 @@ void intHandler(int dummy)
 
 void send_kill_signals()
 {
-  printf("Sending kill signals to connected nodes...\n");
+  printf("[Info] Sending kill signals to connected nodes...\n");
   for (size_t i = 0; i < current_connection_count; i++)
   {
     if (main_container[i]->dead)
@@ -81,8 +81,7 @@ void send_kill_signals()
 
 void send_kill_signal(int socket, int i)
 {
-  printf("Killing node #%i...\n", i);
-  printf("KILLING SOCKET %i\n", socket);
+  printf("[Node #%i] Sending kill signal...\n", i);
   shutdown(socket, SHUT_WR);
   close(socket);
 }
@@ -125,9 +124,6 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
 {
   char current_command;
   int size_received;
-
-  printf("[Node #%i] Jobs No: %i\n", connection_container->position, connection_container->current_jobs);
-
   printf("[Node #%i] Waiting for command...\n", connection_container->position);
 
   // Check if disconnected
@@ -143,12 +139,13 @@ void parse_node_command(int socket, ConnectionContainer *connection_container)
 
   printf("[Node #%i] Command received: %c\n", connection_container->position, current_command);
 
-  // Receiving CURRENT NODE LOAD
+  // Receiving number of jobs on node
   if (current_command == 'B')
   {
     int current_load;
     recv(socket, &current_load, sizeof(int), MSG_WAITALL);
     connection_container->current_jobs = current_load;
+    printf("[Node #%i] Set number of current jobs to: %i\n", connection_container->position, connection_container->current_jobs);
   }
   // Completed image
   else if (current_command == 'D')
@@ -303,8 +300,6 @@ int get_available_node()
 {
   for (size_t i = 0; i < current_connection_count; i++)
   {
-    printf("I: %li, Dead: %i, jobs: %i\n", i, main_container[i]->dead, main_container[i]->current_jobs);
-
     if (!main_container[i]->dead && main_container[i]->current_jobs < CONCURRENT_IMAGES_PER_NODE)
       return i;
   }
@@ -343,18 +338,16 @@ void send_message_to_node(int node, void *buffer, size_t size)
 
 void send_image_to_node(int node, char *filename)
 {
-  pthread_mutex_lock(main_container[node]->lock);
   printf("[Node #%i] Sending image '%s'\n", node, filename);
   send_message_to_node(node, (void *)'I', sizeof(char));
   main_container[node]->current_jobs++;
-  pthread_mutex_unlock(main_container[node]->lock);
 }
 
 void append_image_to_queue(char *filename)
 {
   io_queue_push(&image_queue, filename);
   image_queue_size++;
-  printf("[INFO] Appended '%s' to queue", filename);
+  printf("[Info] Appended '%s' to queue\n", filename);
 }
 
 char *process_image_in_queue()
@@ -396,7 +389,7 @@ void print_nodes_info()
 void *queue_handler()
 {
   print_nodes_info();
-  printf("[INFO] Hay %i elementos en la cola.\n", image_queue_size);
+  printf("[Info] There are %i images in queue.\n", image_queue_size);
   process_image_in_queue();
   sleep(2);
   queue_handler();
@@ -414,7 +407,7 @@ int main(int argc, char *argv[])
 
   if (pthread_mutex_init(&global_lock, NULL) != 0)
   {
-    printf("\n mutex init failed\n");
+    printf("\n[Error] Mutex init failed\n");
     return 1;
   }
 
@@ -422,7 +415,7 @@ int main(int argc, char *argv[])
   socket_desc = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_desc == -1)
   {
-    printf("Could not create socket");
+    printf("[Error] Could not create socket");
   }
 
   //Prepare the sockaddr_in structure
@@ -438,7 +431,7 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  puts("Image distribution server started succesfully");
+  puts("[Welcome] Image distribution server started succesfully");
 
   //Listen
   listen(socket_desc, 3);

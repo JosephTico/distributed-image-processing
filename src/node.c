@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -14,12 +16,7 @@
 #include "stb_image_write.h"
 
 #define NODE_CONNECTION_TYPE 4
-struct image_threads_arguments
-{
-  char *filename;
-  int key;
-  char *output;
-};
+#define MAX_IMAGE_FILENAME 512
 
 void get_pixel(stbi_uc *image, size_t imageWidth, size_t x, size_t y, stbi_uc *r, stbi_uc *g, stbi_uc *b)
 {
@@ -35,12 +32,12 @@ void set_pixel(stbi_uc *image, size_t imageWidth, size_t x, size_t y, stbi_uc r,
   image[4 * (y * imageWidth + x) + 2] = b;
 }
 
-void *process_image(void *arguments_input)
+void process_image(char *filename, int key, char *output)
 {
-  struct image_threads_arguments *args = arguments_input;
 
   int width, height;
-  stbi_uc *image = stbi_load(args->filename, &width, &height, NULL, 4);
+  printf("PROCESSING FILENAME: %s\n", filename);
+  stbi_uc *image = stbi_load(filename, &width, &height, NULL, 4);
   printf("w: %i\n", width);
   printf("h: %i\n", height);
 
@@ -53,15 +50,15 @@ void *process_image(void *arguments_input)
       get_pixel(image, width, x, y, &r, &g, &b);
 
       stbi_uc r_new, g_new, b_new;
-      r_new = r ^ args->key;
-      g_new = g ^ args->key;
-      b_new = b ^ args->key;
+      r_new = r ^ key;
+      g_new = g ^ key;
+      b_new = b ^ key;
 
       set_pixel(image, width, x, y, r_new, g_new, b_new);
     }
   }
 
-  stbi_write_png(args->output, width, height, 4, image, 4 * width);
+  stbi_write_png(output, width, height, 4, image, 4 * width);
   return NULL;
 }
 
@@ -93,21 +90,33 @@ void parse_command(int socket, int current_image_count)
   }
   printf("COMMAND RECEIVED: %c\n", current_command);
 
-  puts("PArsing command");
+  puts("Parsing command");
   if (current_command == 'A')
   {
     puts("Received A command, sending current image count\n");
     printf("Image count: %i\n", current_image_count);
     send_message(socket, (void *)'B', sizeof(char));
-    puts("SEG1");
     send_message(socket, current_image_count, sizeof(int));
-    puts("SEG2");
   }
   else if (current_command == 'I')
   {
     puts("Received a new image");
     current_image_count++;
-    sleep(5);
+
+    // Receive filename
+    char filename[MAX_IMAGE_FILENAME];
+    recv(socket, &filename, sizeof(char) * MAX_IMAGE_FILENAME, MSG_WAITALL);
+
+    // Receive key
+    int key;
+    recv(socket, &key, sizeof(int), MSG_WAITALL);
+
+    printf("Received filename: %s, key: %i\n", filename, key);
+
+    // Receive and process the actual image
+    receive_image(socket, filename, key);
+
+    // Send (D)one message
     send_message(socket, (void *)'D', sizeof(char));
     current_image_count--;
   }
@@ -117,6 +126,76 @@ void parse_command(int socket, int current_image_count)
   }
 
   parse_command(socket, current_image_count);
+}
+
+int receive_image(int socket, char *file_name_string, int key)
+{
+
+  int recv_size = 0, size = 0, read_size, write_size, packet_index = 1, stat;
+
+  char imagearray[10241];
+  FILE *image;
+
+  //Find the size of the image
+  stat = recv(socket, &size, sizeof(int), MSG_WAITALL);
+  if (stat <= 0) {
+    printf("Error receiving message: %s\n", strerror(errno));
+    return -1;
+  }
+
+  image = fopen(file_name_string, "w");
+
+  if (image == NULL)
+  {
+    printf("[Error] Image file could not be opened\n");
+    return -1;
+  }
+
+  //Loop while we have not received the entire file yet
+  struct timeval timeout = {10, 0};
+
+  fd_set fds;
+  int buffer_fd;
+
+
+  while (recv_size < size)
+  {
+
+    FD_ZERO(&fds);
+    FD_SET(socket, &fds);
+
+    buffer_fd = select(FD_SETSIZE, &fds, NULL, NULL, &timeout);
+
+    if (buffer_fd < 0)
+      printf("[Error] Bad file descriptor set.\n");
+
+    if (buffer_fd == 0)
+      printf("[Error] Buffer read timeout expired.\n");
+
+    if (buffer_fd > 0)
+    {
+      do
+      {
+        read_size = read(socket, imagearray, 1024);
+      } while (read_size < 0);
+
+      //Write the currently read data into our image file
+      write_size = fwrite(imagearray, 1, read_size, image);
+
+      if (read_size != write_size)
+      {
+        printf("[Error] Read write failed\n");
+      }
+
+      //Increment the total number of bytes read
+      recv_size += read_size;
+      packet_index++;
+    }
+  }
+  printf("[Info] Image %s received succesfully\n", file_name_string);
+  fclose(image);
+  process_image(file_name_string, key, "testabc.png");
+  return 1;
 }
 
 int main()
@@ -156,20 +235,16 @@ int main()
   printf("Sending Connection Identifier (4)\n");
   write(socket_desc, (void *)&connection_id, sizeof(int));
 
-  int current_image_count = 0;
+  _Atomic int current_image_count = 0;
 
   parse_command(socket_desc, current_image_count);
 
-  struct image_threads_arguments *arguments = (struct image_threads_arguments *)malloc(sizeof(struct image_threads_arguments));
-  arguments->filename = "received_image.png";
-  arguments->key = 2145;
-  arguments->output = "output2.png";
 
-  pthread_t thread_id;
-  printf("Before Thread\n");
-  pthread_create(&thread_id, NULL, process_image, (void *)arguments);
-  pthread_join(thread_id, NULL);
-  printf("After Thread\n");
+  // pthread_t thread_id;
+  // printf("Before Thread\n");
+  // pthread_create(&thread_id, NULL, process_image, (void *)arguments);
+  // pthread_join(thread_id, NULL);
+  // printf("After Thread\n");
 
   close(socket_desc);
 

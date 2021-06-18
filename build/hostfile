@@ -1,9 +1,0 @@
-# This is an example hostfile.  Comments begin with #
-#
-# The following node is a single processor machine:
-localhost slots=4
- 
-# The following node is a dual-processor machine:
-mpiuser@worker1 slots=2
- 
-

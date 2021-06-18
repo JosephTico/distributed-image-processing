@@ -204,11 +204,6 @@ int receive_image(int socket)
     stat = read(socket, &size, sizeof(int));
   } while (stat < 0);
 
-  // printf("Packet received.\n");
-  // printf("Packet size: %i\n", stat);
-  // printf("Image size: %i\n", size);
-  // printf(" \n");
-
   char buffer[] = "Got it";
 
   //Send our verification signal
@@ -224,7 +219,7 @@ int receive_image(int socket)
   pthread_mutex_unlock(&global_lock);
 
   char *file_name_string;
-  asprintf(&file_name_string, "received_image_%d.png", fcounter);
+  asprintf(&file_name_string, "tmp_img_%d.png", fcounter);
 
   image = fopen(file_name_string, "w");
 
@@ -235,7 +230,6 @@ int receive_image(int socket)
   }
 
   //Loop while we have not received the entire file yet
-
   struct timeval timeout = {10, 0};
 
   fd_set fds;
@@ -243,7 +237,6 @@ int receive_image(int socket)
 
   while (recv_size < size)
   {
-    //while(packet_index < 2){
 
     FD_ZERO(&fds);
     FD_SET(socket, &fds);
@@ -263,12 +256,8 @@ int receive_image(int socket)
         read_size = read(socket, imagearray, 1024);
       } while (read_size < 0);
 
-      // printf("Packet number received: %i\n", packet_index);
-      // printf("Packet size: %i\n", read_size);
-
       //Write the currently read data into our image file
       write_size = fwrite(imagearray, 1, read_size, image);
-      // printf("Written image size: %i\n", write_size);
 
       if (read_size != write_size)
       {
@@ -278,12 +267,11 @@ int receive_image(int socket)
       //Increment the total number of bytes read
       recv_size += read_size;
       packet_index++;
-      // printf("Total received image size: %i\n", recv_size);
-      // printf(" \n");
-      // printf(" \n");
     }
   }
   printf("[Info] Image %d received succesfully\n", fcounter);
+  fclose(image);
+
   if (image_queue_size > 0)
   {
     append_image_to_queue(file_name_string);
@@ -292,7 +280,6 @@ int receive_image(int socket)
   {
     send_image_to_distributed_nodes(file_name_string, true);
   }
-  fclose(image);
   return 1;
 }
 
@@ -326,21 +313,52 @@ bool send_image_to_distributed_nodes(char *filename, bool add_to_queue)
 
 void send_message_to_node(int node, void *buffer, size_t size)
 {
-  pthread_mutex_lock(main_container[node]->lock);
   int stat;
   stat = write(main_container[node]->socket, &buffer, size);
   if (stat < 0)
   {
     printf("[Node #%i] Error sending message: %s\n", node, strerror(errno));
   }
-  pthread_mutex_unlock(main_container[node]->lock);
 }
 
 void send_image_to_node(int node, char *filename)
 {
+  int key = 23134;
   printf("[Node #%i] Sending image '%s'\n", node, filename);
+
+  pthread_mutex_lock(main_container[node]->lock);
+
   send_message_to_node(node, (void *)'I', sizeof(char));
+  write(main_container[node]->socket, (void *)filename, sizeof(char) * MAX_IMAGE_FILENAME);
+  send_message_to_node(node, (void *)key, sizeof(int));
+
+  FILE *picture;
+  int size, stat, read_size;
+  char send_buffer[10240];
+
+  picture = fopen(filename, "rb");
+  fseek(picture, 0, SEEK_END);
+  size = ftell(picture);
+  fseek(picture, 0, SEEK_SET);
+  write(main_container[node]->socket, (void *)&size, sizeof(int));
+
+  while (!feof(picture))
+  {
+    //Read from the file into our send buffer
+    read_size = fread(send_buffer, 1, sizeof(send_buffer) - 1, picture);
+
+    //Send data through our socket
+    write(main_container[node]->socket, send_buffer, read_size);
+
+    //Zero out our send buffer
+    bzero(send_buffer, sizeof(send_buffer));
+  }
+
   main_container[node]->current_jobs++;
+
+  fclose(picture);
+
+  pthread_mutex_unlock(main_container[node]->lock);
 }
 
 void append_image_to_queue(char *filename)

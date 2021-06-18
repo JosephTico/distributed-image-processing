@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include<time.h>
+#include <time.h>
 
 #include <semaphore.h>
 
@@ -58,8 +58,6 @@ int validate_params(const char *ip, const char *filename, const char *num)
 
 int sent_to_server(const char *ip, const char *filename)
 {
-    // printf("ip %s \n",  ip);
-    // printf("filename %s \n",  filename);
     int socket_desc;
     struct sockaddr_in server;
     //Create socket
@@ -80,7 +78,6 @@ int sent_to_server(const char *ip, const char *filename)
         puts("Connect Error");
         return 1;
     }
-    // puts("Connected\n");
     send_image(socket_desc, filename);
     close(socket_desc);
     return 0;
@@ -106,30 +103,20 @@ void send_image(int socket, const char *filename)
     fseek(picture, 0, SEEK_END);
     size = ftell(picture);
     fseek(picture, 0, SEEK_SET);
-    // printf("Total Picture size: %i\n", size);
 
     //Send client type
-    // printf("Sending Connection Identifier (3)\n");
     write(socket, (void *)&connection_id, sizeof(int));
 
     //Send Picture Size
-    // printf("Sending Picture Size\n");
     write(socket, (void *)&size, sizeof(int));
-
-    //Send Picture as Byte Array
-    // printf("Sending Picture as Byte Array\n");
 
     do
     { //Read while we get errors that are due to signals.
         stat = read(socket, &read_buffer, 255);
-        // printf("Bytes read: %i\n", stat);
     } while (stat < 0);
 
-    // printf("Received data in socket\n");
-    // printf("Socket data: %s\n", read_buffer);
     while (!feof(picture))
     {
-        //while(packet_index = 1){
         //Read from the file into our send buffer
         read_size = fread(send_buffer, 1, sizeof(send_buffer) - 1, picture);
 
@@ -138,11 +125,6 @@ void send_image(int socket, const char *filename)
         {
             stat = write(socket, send_buffer, read_size);
         } while (stat < 0);
-
-        // printf("Packet Number: %i\n", packet_index);
-        // printf("Packet Size Sent: %i\n", read_size);
-        // printf(" \n");
-        // printf(" \n");
 
         packet_index++;
 

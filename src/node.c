@@ -18,6 +18,8 @@
 #define NODE_CONNECTION_TYPE 4
 #define MAX_IMAGE_FILENAME 512
 
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 void get_pixel(stbi_uc *image, size_t imageWidth, size_t x, size_t y, stbi_uc *r, stbi_uc *g, stbi_uc *b)
 {
   *r = image[4 * (y * imageWidth + x) + 0];
@@ -58,7 +60,7 @@ void process_image(char *filename, int key, char *output)
     }
   }
 
-  stbi_write_png(output, width, height, 4, image, 4 * width);
+  stbi_write_png(filename, width, height, 4, image, 4 * width);
   return NULL;
 }
 
@@ -143,6 +145,7 @@ int receive_image(int socket, char *file_name_string, int key)
     return -1;
   }
 
+  printf("OBTAINED SIZE: %i\n", size);
   image = fopen(file_name_string, "w");
 
   if (image == NULL)
@@ -167,16 +170,24 @@ int receive_image(int socket, char *file_name_string, int key)
     buffer_fd = select(FD_SETSIZE, &fds, NULL, NULL, &timeout);
 
     if (buffer_fd < 0)
+    {
       printf("[Error] Bad file descriptor set.\n");
+      return;
+    }
 
     if (buffer_fd == 0)
+    {
       printf("[Error] Buffer read timeout expired.\n");
+      return;
+    }
+
+    int toRead = MIN(size - recv_size, 1024);
 
     if (buffer_fd > 0)
     {
       do
       {
-        read_size = read(socket, imagearray, 1024);
+        read_size = read(socket, imagearray, toRead);
       } while (read_size < 0);
 
       //Write the currently read data into our image file
@@ -193,6 +204,7 @@ int receive_image(int socket, char *file_name_string, int key)
     }
   }
   printf("[Info] Image %s received succesfully\n", file_name_string);
+  printf("DEBUG. RECEIVED: %i\n", recv_size);
   fclose(image);
   process_image(file_name_string, key, "testabc.png");
   return 1;

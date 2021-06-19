@@ -26,7 +26,7 @@
 typedef struct
 {
   int socket;
-  pthread_mutex_t *lock;
+  pthread_mutex_t lock;
   atomic_int current_jobs;
   int position;
   bool dead;
@@ -169,24 +169,24 @@ void setup_node(int socket)
   // Set socket
   new_conn_ptr->socket = (uintptr_t)socket;
   // Create, set and init mutex lock
-  pthread_mutex_t *plock;
-  plock = malloc(sizeof(pthread_mutex_t));
-  new_conn_ptr->lock = plock;
-  if (pthread_mutex_init(new_conn_ptr->lock, NULL) != 0)
+  if (pthread_mutex_init(&new_conn_ptr->lock, NULL) != 0)
   {
-    printf("\n[Error] mutex init failed\n");
+    printf("\n[Error] Mutex init failed for Node #%i\n", current_connection_count);
     return;
   }
+  // Send initial signal
+  pthread_mutex_lock(&new_conn_ptr->lock);
+  char buffer = 'A';
+  write(socket, (void *)&buffer, sizeof(char));
+  pthread_mutex_unlock(&new_conn_ptr->lock);
+
   // Rest of container init
   new_conn_ptr->current_jobs = 0;
   new_conn_ptr->dead = false;
   new_conn_ptr->position = current_connection_count;
   main_container[current_connection_count++] = new_conn_ptr;
 
-  // Send initial signal
-  char buffer = 'A';
-  write(socket, (void *)&buffer, sizeof(char));
-
+  // Parse any future command
   parse_node_command(socket, new_conn_ptr);
 }
 
@@ -219,7 +219,7 @@ int receive_image(int socket)
   pthread_mutex_unlock(&global_lock);
 
   char *file_name_string;
-  asprintf(&file_name_string, "tmp_img_%d.png", fcounter);
+  asprintf(&file_name_string, "processed_img_%d.png", fcounter);
 
   image = fopen(file_name_string, "w");
 
@@ -313,24 +313,34 @@ bool send_image_to_distributed_nodes(char *filename, bool add_to_queue)
 
 void send_message_to_node(int node, void *buffer, size_t size)
 {
+  pthread_mutex_lock(&main_container[node]->lock);
+  printf("LOCKED MUTEX MSG\n");
   int stat;
   stat = write(main_container[node]->socket, &buffer, size);
   if (stat < 0)
   {
     printf("[Node #%i] Error sending message: %s\n", node, strerror(errno));
   }
+  pthread_mutex_unlock(&main_container[node]->lock);
+  printf("UNLOCKED MUTEX MSG\n");
 }
 
 void send_image_to_node(int node, char *filename)
 {
+  main_container[node]->current_jobs++;
+
+  printf("LOCKING MUTEX IMG %s for PTR %li\n", filename, &main_container[node]->lock);
+  pthread_mutex_lock(&main_container[node]->lock);
+  printf("LOCKED MUTEX IMG %s for PTR %li\n", filename, &main_container[node]->lock);
+  
   int key = 23134;
-  printf("[Node #%i] Sending image '%s'\n", node, filename);
+  char operation = 'I';
 
-  pthread_mutex_lock(main_container[node]->lock);
+  printf("[Node #%i] Sending image '%s'\n", node, filename);  
 
-  send_message_to_node(node, (void *)'I', sizeof(char));
+  write(main_container[node]->socket, (void *)&operation, sizeof(char));
   write(main_container[node]->socket, (void *)filename, sizeof(char) * MAX_IMAGE_FILENAME);
-  send_message_to_node(node, (void *)key, sizeof(int));
+  write(main_container[node]->socket, (void *)&key, sizeof(int));
 
   FILE *picture;
   int size, stat, read_size;
@@ -341,6 +351,7 @@ void send_image_to_node(int node, char *filename)
   size = ftell(picture);
   fseek(picture, 0, SEEK_SET);
   write(main_container[node]->socket, (void *)&size, sizeof(int));
+  printf("OBTAINED SIZE: %i\n", size);
 
   while (!feof(picture))
   {
@@ -354,11 +365,16 @@ void send_image_to_node(int node, char *filename)
     bzero(send_buffer, sizeof(send_buffer));
   }
 
-  main_container[node]->current_jobs++;
-
   fclose(picture);
 
-  pthread_mutex_unlock(main_container[node]->lock);
+  remove(filename);
+
+
+
+  printf("UNLOCKING MUTEX IMG %s\n", filename);
+  
+  pthread_mutex_unlock(&main_container[node]->lock);
+  printf("UNLOCKED MUTEX IMG %s\n", filename);
 }
 
 void append_image_to_queue(char *filename)

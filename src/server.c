@@ -39,6 +39,7 @@ sem_t sem;
 pthread_mutex_t global_lock;
 int socket_desc;
 IoQueue image_queue;
+IoQueue key_queue;
 _Atomic int filecounter;
 _Atomic int current_connection_count = 0;
 _Atomic int image_queue_size = 0;
@@ -52,12 +53,12 @@ void parse_node_command(int socket, ConnectionContainer *connection_container);
 void setup_node(int socket);
 int receive_image(int socket);
 int get_available_node();
-bool send_image_to_distributed_nodes(char *filename, bool add_to_queue);
+bool send_image_to_distributed_nodes(char *filename, int key, bool add_to_queue);
 void send_message_to_node(int node, void *buffer, size_t size);
-void send_image_to_node(int node, char *filename);
+void send_image_to_node(int node, char *filename, int key);
 char *process_image_in_queue();
 void *queue_handler();
-void append_image_to_queue(char *filename);
+void append_image_to_queue(char *filename, int key);
 void print_nodes_info();
 
 // Handle SIGINT
@@ -193,10 +194,16 @@ void setup_node(int socket)
 int receive_image(int socket)
 {
 
-  int recv_size = 0, size = 0, read_size, write_size, packet_index = 1, stat;
+  int recv_size = 0, size = 0, key = 0, read_size, write_size, packet_index = 1, stat;
 
   char imagearray[10241];
   FILE *image;
+
+  //Find the keyof the image
+  do
+  {
+    stat = read(socket, &key, sizeof(int));
+  } while (stat < 0);
 
   //Find the size of the image
   do
@@ -274,11 +281,11 @@ int receive_image(int socket)
 
   if (image_queue_size > 0)
   {
-    append_image_to_queue(file_name_string);
+    append_image_to_queue(file_name_string, key);
   }
   else
   {
-    send_image_to_distributed_nodes(file_name_string, true);
+    send_image_to_distributed_nodes(file_name_string, key, true);
   }
   return 1;
 }
@@ -293,7 +300,7 @@ int get_available_node()
   return -1;
 }
 
-bool send_image_to_distributed_nodes(char *filename, bool add_to_queue)
+bool send_image_to_distributed_nodes(char *filename, int key, bool add_to_queue)
 {
   printf("[Info] Trying to send '%s' to nodes\n", filename);
   int node = get_available_node();
@@ -301,12 +308,12 @@ bool send_image_to_distributed_nodes(char *filename, bool add_to_queue)
   if (node < 0)
   {
     if (add_to_queue)
-      append_image_to_queue(filename);
+      append_image_to_queue(filename, key);
     return false;
   }
   else
   {
-    send_image_to_node(node, filename);
+    send_image_to_node(node, filename, key);
     return true;
   }
 }
@@ -314,7 +321,6 @@ bool send_image_to_distributed_nodes(char *filename, bool add_to_queue)
 void send_message_to_node(int node, void *buffer, size_t size)
 {
   pthread_mutex_lock(&main_container[node]->lock);
-  printf("LOCKED MUTEX MSG\n");
   int stat;
   stat = write(main_container[node]->socket, &buffer, size);
   if (stat < 0)
@@ -322,21 +328,17 @@ void send_message_to_node(int node, void *buffer, size_t size)
     printf("[Node #%i] Error sending message: %s\n", node, strerror(errno));
   }
   pthread_mutex_unlock(&main_container[node]->lock);
-  printf("UNLOCKED MUTEX MSG\n");
 }
 
-void send_image_to_node(int node, char *filename)
+void send_image_to_node(int node, char *filename, int key)
 {
   main_container[node]->current_jobs++;
 
-  printf("LOCKING MUTEX IMG %s for PTR %li\n", filename, &main_container[node]->lock);
   pthread_mutex_lock(&main_container[node]->lock);
-  printf("LOCKED MUTEX IMG %s for PTR %li\n", filename, &main_container[node]->lock);
-  
-  int key = 23134;
+
   char operation = 'I';
 
-  printf("[Node #%i] Sending image '%s'\n", node, filename);  
+  printf("[Node #%i] Sending image '%s' with key '%i'\n", node, filename, key);  
 
   write(main_container[node]->socket, (void *)&operation, sizeof(char));
   write(main_container[node]->socket, (void *)filename, sizeof(char) * MAX_IMAGE_FILENAME);
@@ -351,7 +353,6 @@ void send_image_to_node(int node, char *filename)
   size = ftell(picture);
   fseek(picture, 0, SEEK_SET);
   write(main_container[node]->socket, (void *)&size, sizeof(int));
-  printf("OBTAINED SIZE: %i\n", size);
 
   while (!feof(picture))
   {
@@ -368,18 +369,15 @@ void send_image_to_node(int node, char *filename)
   fclose(picture);
 
   remove(filename);
-
-
-
-  printf("UNLOCKING MUTEX IMG %s\n", filename);
   
   pthread_mutex_unlock(&main_container[node]->lock);
-  printf("UNLOCKED MUTEX IMG %s\n", filename);
 }
 
-void append_image_to_queue(char *filename)
+void append_image_to_queue(char *filename, int key)
 {
+  printf("TRYING TO APPEND TO QUEUE\n");
   io_queue_push(&image_queue, filename);
+  io_queue_push(&key_queue, &key);
   image_queue_size++;
   printf("[Info] Appended '%s' to queue\n", filename);
 }
@@ -387,14 +385,17 @@ void append_image_to_queue(char *filename)
 char *process_image_in_queue()
 {
   char out[MAX_IMAGE_FILENAME];
+  int key;
   if (io_queue_has_front(&image_queue) == IO_QUEUE_RESULT_TRUE && image_queue_size > 0)
   {
 
     io_queue_front(&image_queue, &out);
-    bool did_send = send_image_to_distributed_nodes(out, false);
+    io_queue_front(&key_queue, &key);
+    bool did_send = send_image_to_distributed_nodes(out, key, false);
     if (did_send)
     {
       io_queue_pop(&image_queue);
+      io_queue_pop(&key_queue);
       image_queue_size--;
     }
   }
@@ -437,6 +438,7 @@ int main(int argc, char *argv[])
   int new_socket, c;
   struct sockaddr_in server, client;
   io_queue_init(&image_queue, sizeof(char) * MAX_IMAGE_FILENAME);
+  io_queue_init(&key_queue, sizeof(int));
   filecounter = 0;
 
   if (pthread_mutex_init(&global_lock, NULL) != 0)

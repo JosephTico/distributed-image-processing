@@ -20,6 +20,16 @@
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+_Atomic int current_image_count;
+pthread_mutex_t global_lock;
+
+struct image_threads_arguments
+{
+  char *filename;
+  int key;
+  int socket;
+};
+
 void get_pixel(stbi_uc *image, size_t imageWidth, size_t x, size_t y, stbi_uc *r, stbi_uc *g, stbi_uc *b)
 {
   *r = image[4 * (y * imageWidth + x) + 0];
@@ -34,12 +44,14 @@ void set_pixel(stbi_uc *image, size_t imageWidth, size_t x, size_t y, stbi_uc r,
   image[4 * (y * imageWidth + x) + 2] = b;
 }
 
-void process_image(char *filename, int key, char *output)
+void *process_image(void *arguments_input)
 {
 
+  struct image_threads_arguments *args = arguments_input;
+
   int width, height;
-  printf("PROCESSING FILENAME: %s\n", filename);
-  stbi_uc *image = stbi_load(filename, &width, &height, NULL, 4);
+  printf("PROCESSING FILENAME: %s with key: %i\n", args->filename, args->key);
+  stbi_uc *image = stbi_load(args->filename, &width, &height, NULL, 4);
   printf("w: %i\n", width);
   printf("h: %i\n", height);
 
@@ -52,20 +64,26 @@ void process_image(char *filename, int key, char *output)
       get_pixel(image, width, x, y, &r, &g, &b);
 
       stbi_uc r_new, g_new, b_new;
-      r_new = r ^ key;
-      g_new = g ^ key;
-      b_new = b ^ key;
+      r_new = r ^ args->key;
+      g_new = g ^ args->key;
+      b_new = b ^ args->key;
 
       set_pixel(image, width, x, y, r_new, g_new, b_new);
     }
   }
 
-  stbi_write_png(filename, width, height, 4, image, 4 * width);
+  stbi_write_png(args->filename, width, height, 4, image, 4 * width);
+
+  // Send (D)one message
+  send_message(args->socket, (void *)'D', sizeof(char));
+  current_image_count--;
+
   return NULL;
 }
 
 int send_message(int socket, void *buffer, size_t size)
 {
+  pthread_mutex_lock(&global_lock);
   int stat;
 
   stat = write(socket, &buffer, size);
@@ -75,10 +93,12 @@ int send_message(int socket, void *buffer, size_t size)
     printf("Error sending message: %s\n", strerror(errno));
   }
 
+  pthread_mutex_unlock(&global_lock);
+
   return stat;
 }
 
-void parse_command(int socket, int current_image_count)
+void parse_command(int socket)
 {
   char current_command = 'Z';
   int stat;
@@ -117,17 +137,13 @@ void parse_command(int socket, int current_image_count)
 
     // Receive and process the actual image
     receive_image(socket, filename, key);
-
-    // Send (D)one message
-    send_message(socket, (void *)'D', sizeof(char));
-    current_image_count--;
   }
   else
   {
     puts("Received invalid command");
   }
 
-  parse_command(socket, current_image_count);
+  parse_command(socket);
 }
 
 int receive_image(int socket, char *file_name_string, int key)
@@ -206,18 +222,38 @@ int receive_image(int socket, char *file_name_string, int key)
   printf("[Info] Image %s received succesfully\n", file_name_string);
   printf("DEBUG. RECEIVED: %i\n", recv_size);
   fclose(image);
-  process_image(file_name_string, key, "testabc.png");
+
+  struct image_threads_arguments *arguments = (struct image_threads_arguments *)malloc(sizeof(struct image_threads_arguments));
+  arguments->filename = file_name_string;
+  arguments->key = key;
+  arguments->socket = socket;
+
+  pthread_t thread_id;
+  pthread_create(&thread_id, NULL, process_image, (void *)arguments);
+
   return 1;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-  // printf() displays the string inside quotation
-  printf("Hello, World!\n");
+  if (argc != 2)
+  {
+    puts("IP was not specified as parameter");
+    return EXIT_FAILURE;
+  }
+  printf("Starting an image node....\n");
 
   int socket_desc;
   int connection_id = NODE_CONNECTION_TYPE;
   struct sockaddr_in server;
+  const char *ip = argv[1];
+
+  // Init global mutex
+  if (pthread_mutex_init(&global_lock, NULL) != 0)
+  {
+    printf("\n[Error] Global mutex init failed\n");
+    return 1;
+  }
 
   //Create socket
   socket_desc = socket(AF_INET, SOCK_STREAM, 0);
@@ -228,7 +264,7 @@ int main()
   }
 
   memset(&server, 0, sizeof(server));
-  server.sin_addr.s_addr = inet_addr("127.0.0.1");
+  server.sin_addr.s_addr = inet_addr(ip);
   server.sin_family = AF_INET;
   server.sin_port = htons(8889);
 
@@ -247,10 +283,9 @@ int main()
   printf("Sending Connection Identifier (4)\n");
   write(socket_desc, (void *)&connection_id, sizeof(int));
 
-  _Atomic int current_image_count = 0;
+  current_image_count = 0;
 
-  parse_command(socket_desc, current_image_count);
-
+  parse_command(socket_desc);
 
   // pthread_t thread_id;
   // printf("Before Thread\n");

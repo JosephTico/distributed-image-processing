@@ -443,7 +443,7 @@ int main(int argc, char *argv[])
 
   if (pthread_mutex_init(&global_lock, NULL) != 0)
   {
-    printf("\n[Error] Mutex init failed\n");
+    printf("\n[Error] Global mutex init failed\n");
     return 1;
   }
 
